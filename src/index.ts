@@ -1,61 +1,105 @@
-import { Reshuffle, BaseConnector, EventConfiguration } from 'reshuffle-base-connector'
+import amqplib, { Connection, Channel, Options, ConsumeMessage } from 'amqplib'
+import { Reshuffle, EventConfiguration, BaseConnector } from 'reshuffle-base-connector'
 
-export interface _CONNECTOR_NAME_ConnectorConfigOptions {
-  var1: string
-  // ...
+export interface AMQPConnectorConfigOptions {
+  queueUrl: string
+  queueName: string
+  queueOptions?: Options.AssertQueue
 }
 
-export interface _CONNECTOR_NAME_ConnectorEventOptions {
-  option1?: string
-  // ...
+export interface AMQPConnectorEventOptions {
+  consumeOptions?: Options.Consume
 }
 
-export default class _CONNECTOR_NAME_Connector extends BaseConnector<
-  _CONNECTOR_NAME_ConnectorConfigOptions,
-  _CONNECTOR_NAME_ConnectorEventOptions
-> {
-  // Your class variables
-  var1: string
+export default class AMQPConnector extends BaseConnector {
+  private client: typeof amqplib
+  private connectionPublisher?: Connection
+  private connectionConsumer?: Connection
+  private channelPublisher?: Channel
+  private channelConsumer?: Channel
+  private handlersByEventId: { [eventId: string]: any } = {}
 
-  constructor(app: Reshuffle, options?: _CONNECTOR_NAME_ConnectorConfigOptions, id?: string) {
+  constructor(app: Reshuffle, options: AMQPConnectorConfigOptions, id?: string) {
     super(app, options, id)
-    this.var1 = options?.var1 || 'initial value'
-    // ...
-  }
-
-  onStart(): void {
-    // If you need to do something specific on start, otherwise remove this function
-  }
-
-  onStop(): void {
-    // If you need to do something specific on stop, otherwise remove this function
-  }
-
-  // Your events
-  on(
-    options: _CONNECTOR_NAME_ConnectorEventOptions,
-    handler: any,
-    eventId: string,
-  ): EventConfiguration {
-    if (!eventId) {
-      eventId = `_CONNECTOR_NAME_/${options.option1}/${this.id}`
+    this.client = amqplib
+    if (!options) {
+      throw new Error('Empty connection config')
     }
-    const event = new EventConfiguration(eventId, this, options)
-    this.eventConfigurations[event.id] = event
+  }
 
-    this.app.when(event, handler)
+  on(options: AMQPConnectorEventOptions, handler: any, eventId: string): EventConfiguration {
+    if (!eventId) {
+      eventId = `AMQP/${this.configOptions?.queueUrl}/${this.id}`
+    }
 
+    const event: EventConfiguration = new EventConfiguration(eventId, this, options)
+    this.eventConfigurations[eventId] = event
+    this.handlersByEventId[eventId] = handler
     return event
   }
 
-  // Your actions
-  action1(bar: string): void {
-    // Your implementation here
+  async onStart(): Promise<void> {
+    await this.createQueue(true)
+    await this.createQueue(false)
+    Object.entries(this.handlersByEventId).forEach(async ([eventId, handler]) => {
+      await this.consume(handler, this.eventConfigurations[eventId].options)
+    })
   }
 
-  action2(foo: string): void {
-    // Your implementation here
+  public onStop() {
+    this.app.getLogger().info('Closing connections and channels')
+    // Closing a connection automatically closes all channels on it
+    this.connectionConsumer?.close
+    this.connectionPublisher?.close
+  }
+
+  private async createQueue(isConsumer: boolean) {
+    const connection = await amqplib.connect(this.configOptions.queueUrl)
+    const channel = await connection.createChannel()
+    await channel.assertQueue(this.configOptions.queueName, this.configOptions.queueOptions)
+    this.setChannels(isConsumer, connection, channel)
+  }
+
+  private setChannels(isConsumer: boolean, connection: Connection, channel: Channel) {
+    if (isConsumer) {
+      this.channelConsumer = channel
+      this.connectionConsumer = connection
+    } else {
+      this.channelPublisher = channel
+      this.connectionPublisher = connection
+    }
+  }
+
+  private async consume(
+    onMessage: (msg: ConsumeMessage | null) => void,
+    consumeOptions?: Options.Consume,
+  ) {
+    await this.channelConsumer?.consume(
+      this.configOptions.queueName,
+      (msg) => {
+        onMessage(msg)
+        if (msg) { this.channelConsumer?.ack(msg) }
+      },
+      consumeOptions,
+    )
+  }
+
+  public sendMessage(message: string, publishOptions?: Options.Publish): boolean {
+    if(!this.channelPublisher) {
+      return false
+    }
+    return this.channelPublisher.sendToQueue(
+      this.configOptions.queueName,
+      Buffer.from(message),
+      publishOptions,
+    )
+  }
+
+  // Full list of actions in SDK:
+  // http://www.squaremobius.net/amqp.node/channel_api.html
+  public sdk(): typeof amqplib {
+    return this.client
   }
 }
 
-export { _CONNECTOR_NAME_Connector }
+export { AMQPConnector }
