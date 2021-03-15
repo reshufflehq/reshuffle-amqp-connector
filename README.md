@@ -10,14 +10,14 @@
 
 
 This package contains a [Reshuffle](https://github.com/reshufflehq/reshuffle)
-connector to an AMQP (Advanced Message Queuing Protocol).
+connector to AMQP (Advanced Message Queuing Protocol).
 
-The connector uses the [amqplib.node](https://www.npmjs.com/package/amqplib) client package.
+The connector uses the [amqplib](https://www.npmjs.com/package/amqplib) client package.
 
 An overview of the AMQP concepts and terms is decribed [here](https://www.rabbitmq.com/tutorials/amqp-concepts.html).
 
 
-The following example connects to a queue, registers a Consumer`*` with a handler function and sends two messages to the queue:
+The following example connects to a queue, registers a Consumer (see below) with a handler function and sends two messages to the queue:
 
 ```js
 const { Reshuffle } = require('reshuffle')
@@ -32,10 +32,10 @@ const { AMQPConnector } = require('reshuffle-amqp-connector')
     })
 
   amqp.on({ noAck: false }, function(msg) {
-      console.log('A new received', msg.content.toString())
-   })
+    console.log(`Mesage ${msg.content.toString()} received`)
+  })
 
-  setTimeout(function(){
+  setTimeout(function(){ // See below the reason for using the setTimeout
      amqp.sendMessage('MSG-001', { persistent: true })
      amqp.sendMessage('MSG-002')
   }, 2000)
@@ -44,12 +44,18 @@ const { AMQPConnector } = require('reshuffle-amqp-connector')
 
 (`*`) A [Consumer](https://www.rabbitmq.com/consumers.html) is a subscription for the queue. 
 
-(`**`) In the above example the `sendMessage` function is called after a short delay just to enbale the `AMQPConnector` finish all it's internal `async` instansiations.
+(`**`) In the above example the `sendMessage` function is called after a short delay just to enbale the `AMQPConnector` to finish all its internal `async` instantiations.
 
 The `AMQPConnector` is implemented as a [Task Queue](https://www.rabbitmq.com/tutorials/tutorial-two-javascript.html) which means that messages are sent to the queue and one or more Consumers can be registered to this queue. 
 
 You can define several Consumers by calling the `AMQPConnector.on` function multiple times with different `eventId`s.
 
+For example, in the following code we create two Consumers that are registered to the same queue.
+
+```js
+  amqp.on({ noAck: false }, messageHandler, 'consumer-01')
+  amqp.on({ noAck: false }, messageHandler, 'consumer-02')
+```
 
 #### Table of Contents
 
@@ -59,9 +65,9 @@ You can define several Consumers by calling the `AMQPConnector.on` function mult
 
 #### Connector Events
 
-[Consuming the queue messages](#consumingMessages) 
+[Queue message](#queueMessage) 
 
-[EventsDataTypes](#eventsDataTypes) Events Data Types
+[EventDataTypes](#eventDataTypes) Event Data Types
 
 #### Connector Actions
 
@@ -71,6 +77,9 @@ You can define several Consumers by calling the `AMQPConnector.on` function mult
 
 
 ##### <a name="configuration"></a>Configuration options
+
+`AMQPConnector` is based on `amqplib` client package, more details about `amqplib` APIs and datatypes can be found in the [amqplib documentation](http://www.squaremobius.net/amqp.node/channel_api.html)
+
 
 ```typescript
 interface AMQPConnectorConfigOptions {
@@ -98,18 +107,18 @@ interface AMQPConnectorConfigOptions {
   maxPriority?: number
 }
 ```
-The `Options` namespace can be imported form the [`amqplib`](https://www.npmjs.com/package/amqplib) client.
+The `Options` namespace can be imported from the [`amqplib`](https://www.npmjs.com/package/amqplib) client.
 
-More details about Options.AssertQueue available [here](http://www.squaremobius.net/amqp.node/channel_api.html#channel_assertQueue).
+More details about `Options.AssertQueue` are available [here](http://www.squaremobius.net/amqp.node/channel_api.html#channel_assertQueue).
 
 
 #### Connector events
 
-##### <a name="consumingMessages"></a>Consuming the queue messages
+##### <a name="queueMessage"></a>Queue message
 Register a [Consumer](https://www.rabbitmq.com/consumers.html) to the queue by using the `AMQPConnector.on` function.
-The `handler` function will be invoked by the `amqplib` when a new message is found in the queue.
+The `handler` function will be invoked when a new message is found in the queue.
 
-##### <a name="eventsDataTypes"></a>EventsDataTypes
+##### <a name="eventDataTypes"></a>EventDataTypes
 
 ```ts
 interface AMQPConnectorEventOptions {
@@ -129,10 +138,21 @@ interface AMQPConnectorEventOptions {
   arguments?: any
 }
 ```
-More details about Options.Consume available [here](http://www.squaremobius.net/amqp.node/channel_api.html#channel_consume).
+More details about `Options.Consume` are available [here](http://www.squaremobius.net/amqp.node/channel_api.html#channel_consume).
 
 
-<a name="_Options.Publish:_"></a>_Options.Publish:_
+#### Connector actions
+
+##### <a name="sendMessage"></a>Send message to queue
+Send a single message with the content given as a string to the specific queue.
+
+_Definition:_
+
+```ts
+(message: string, publishOptions?: Options.Publish) => boolean
+```
+
+_Options.Publish:_
 
 ```ts
 {
@@ -155,19 +175,8 @@ More details about Options.Consume available [here](http://www.squaremobius.net/
    appId?: string
 }
 ```
-More details about Options.Publish available [here](http://www.squaremobius.net/amqp.node/channel_api.html#channel_publish).
+More details about `Options.Publish` are available [here](http://www.squaremobius.net/amqp.node/channel_api.html#channel_publish).
 
-
-#### Connector actions
-
-##### <a name="sendMessage"></a>Send message to queue
-Send a single message with the content given as a string to the specific queue.
-
-_Definition:_
-
-```ts
-(message: string, publishOptions?: Options.Publish) => boolean
-```
 
 _Usage:_
 
@@ -199,7 +208,7 @@ await channel.consume(
   {deliveryMode: true},
 )
 
-channel.sendToQueue(channelName, Buffer.from('First event'), {deliveryMode: true})
-channel.sendToQueue(channelName, Buffer.from('Second one'))
+channel.sendToQueue(channelName, Buffer.from('First message'), {deliveryMode: true})
+channel.sendToQueue(channelName, Buffer.from('Second message'))
 
 ```

@@ -18,6 +18,7 @@ export default class AMQPConnector extends BaseConnector {
   private channelPublisher?: Channel
   private channelConsumer?: Channel
   private handlersByEventId: { [eventId: string]: any } = {}
+  private isConsumerRequired = false
 
   constructor(app: Reshuffle, options: AMQPConnectorConfigOptions, id?: string) {
     super(app, options, id)
@@ -32,6 +33,7 @@ export default class AMQPConnector extends BaseConnector {
       eventId = `AMQP/${this.configOptions?.queueUrl}/${this.id}`
     }
 
+    this.isConsumerRequired = true
     const event: EventConfiguration = new EventConfiguration(eventId, this, options)
     this.eventConfigurations[eventId] = event
     this.handlersByEventId[eventId] = handler
@@ -39,10 +41,12 @@ export default class AMQPConnector extends BaseConnector {
   }
 
   async onStart(): Promise<void> {
-    await this.createQueue(true)
+    if(this.isConsumerRequired) {
+      await this.createQueue(true)
+    }
     await this.createQueue(false)
     Object.entries(this.handlersByEventId).forEach(async ([eventId, handler]) => {
-      await this.consume(handler, this.eventConfigurations[eventId].options)
+      this.consume(handler, this.eventConfigurations[eventId].options)
     })
   }
 
@@ -74,7 +78,7 @@ export default class AMQPConnector extends BaseConnector {
     onMessage: (msg: ConsumeMessage | null) => void,
     consumeOptions?: Options.Consume,
   ) {
-    await this.channelConsumer?.consume(
+    this.channelConsumer?.consume(
       this.configOptions.queueName,
       (msg) => {
         onMessage(msg)
